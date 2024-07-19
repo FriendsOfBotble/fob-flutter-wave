@@ -1,0 +1,12 @@
+{
+    "id": "friendsofbotble/flutter-wave",
+    "name": "FlutterWave Payment Gateway",
+    "namespace": "FriendsOfBotble\\FlutterWave\\",
+    "provider": "FriendsOfBotble\\FlutterWave\\Providers\\FlutterWaveServiceProvider",
+    "author": "Friends of Botble",
+    "url": "https://friendsofbotble.com",
+    "version": "1.0.0",
+    "description": "FlutterWave payment gateway integration",
+    "minimum_core_version": "7.0.0",
+    "require": ["botble/ecommerce", "botble/payment"]
+}

@@ -1,11 +1,13 @@
 @php
     $data = $payment['data'];
-    $address = app(\Botble\Ecommerce\Repositories\Interfaces\OrderAddressInterface::class)->getFirstBy([
+    if (is_plugin_active('ecommerce')) {
+        $address = app(\Botble\Ecommerce\Repositories\Interfaces\OrderAddressInterface::class)->getFirstBy([
         'order_id' => Arr::first(json_decode($data['meta']['order_id']) ?? []),
     ]);
+    }
 @endphp
 
-<div class="alert alert-success" role="alert">
+<div class="alert alert-success mt-4" role="alert">
     <p class="mb-2">{{ trans('plugins/payment::payment.payment_id') }}: <strong>{{ $data['id'] }}</strong></p>
 
     <p class="mb-2">
@@ -17,17 +19,19 @@
         </span>
     </p>
 
-    <p class="mb-2">{{ trans('plugins/payment::payment.payer_name') }}: {{ $address->name }}</p>
-    <p class="mb-2">{{ trans('plugins/payment::payment.email') }}: {{ $address->email }}</p>
+    @if(is_plugin_active('ecommerce') && $address)
+        <p class="mb-2">{{ trans('plugins/payment::payment.payer_name') }}: {{ $address->name }}</p>
+        <p class="mb-2">{{ trans('plugins/payment::payment.email') }}: {{ $address->email }}</p>
 
-    @if ($address->phone)
-        <p class="mb-2">{{ trans('plugins/payment::payment.phone')  }}: {{ $address->phone }}</p>
+        @if ($address->phone)
+            <p class="mb-2">{{ trans('plugins/payment::payment.phone')  }}: {{ $address->phone }}</p>
+        @endif
+
+        <p class="mb-0">
+            {{ trans('plugins/payment::payment.shipping_address') }}:
+            {{ $address->name }}, {{ $address->city }}, {{ $address->state }}, {{ $address->country }} {{ $address->zipcode }}
+        </p>
     @endif
-
-    <p class="mb-0">
-        {{ trans('plugins/payment::payment.shipping_address') }}:
-        {{ $address->name }}, {{ $address->city }}, {{ $address->state }}, {{ $address->country }} {{ $address->zipcode }}
-    </p>
 </div>
 
 @if (isset($payment['refunds']))

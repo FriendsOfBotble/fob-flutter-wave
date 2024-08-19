@@ -2,13 +2,13 @@
 
 namespace FriendsOfBotble\FlutterWave\Http\Controllers;
 
-use FriendsOfBotble\FlutterWave\Providers\FlutterWaveServiceProvider;
-use FriendsOfBotble\FlutterWave\Services\FlutterWaveService;
 use Botble\Base\Http\Controllers\BaseController;
 use Botble\Base\Http\Responses\BaseHttpResponse;
 use Botble\Ecommerce\Models\Customer;
 use Botble\Payment\Enums\PaymentStatusEnum;
 use Botble\Payment\Supports\PaymentHelper;
+use FriendsOfBotble\FlutterWave\Providers\FlutterWaveServiceProvider;
+use FriendsOfBotble\FlutterWave\Services\FlutterWaveService;
 use Illuminate\Http\Request;
 
 class FlutterWaveController extends BaseController
@@ -61,6 +61,7 @@ class FlutterWaveController extends BaseController
         do_action(PAYMENT_ACTION_PAYMENT_PROCESSED, [
             'order_id' => json_decode($data['meta']['order_id']),
             'amount' => $data['amount'],
+            'currency' => $data['currency'],
             'charge_id' => $data['id'],
             'payment_channel' => FlutterWaveServiceProvider::MODULE_NAME,
             'status' => $status,
@@ -69,8 +70,14 @@ class FlutterWaveController extends BaseController
             'payment_type' => 'direct',
         ], $request);
 
+        $nextUrl = PaymentHelper::getRedirectURL($data['meta']['token']);
+
+        if (is_plugin_active('job-board')) {
+            $nextUrl = $nextUrl . '?charge_id=' . $data['id'];
+        }
+
         return $response
-            ->setNextUrl(PaymentHelper::getRedirectURL($data['meta']['token']))
+            ->setNextUrl($nextUrl)
             ->setMessage(__('Checkout successfully!'));
     }
 

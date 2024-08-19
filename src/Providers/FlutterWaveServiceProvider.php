@@ -17,6 +17,10 @@ class FlutterWaveServiceProvider extends ServiceProvider
             return;
         }
 
+        if (! is_plugin_active('ecommerce') && ! is_plugin_active('job-board')) {
+            return;
+        }
+
         $this->setNamespace('plugins/flutter-wave')
             ->loadAndPublishTranslations()
             ->loadAndPublishViews()

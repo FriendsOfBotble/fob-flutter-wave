@@ -2,24 +2,25 @@
 
 namespace FriendsOfBotble\FlutterWave\Providers;
 
-use FriendsOfBotble\FlutterWave\Services\FlutterWavePaymentService;
-use FriendsOfBotble\FlutterWave\Services\FlutterWaveService;
 use Botble\Ecommerce\Facades\OrderHelper;
 use Botble\Payment\Enums\PaymentMethodEnum;
 use Botble\Payment\Facades\PaymentMethods;
+use FriendsOfBotble\FlutterWave\Services\FlutterWavePaymentService;
+use FriendsOfBotble\FlutterWave\Services\FlutterWaveService;
 use Html;
 use Illuminate\Http\Request;
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Support\Str;
 use Throwable;
 
 class HookServiceProvider extends ServiceProvider
 {
     public function boot(): void
     {
-        add_filter(PAYMENT_METHODS_SETTINGS_PAGE, function (string|null $settings) {
+        add_filter(PAYMENT_METHODS_SETTINGS_PAGE, function (?string $settings) {
             $name = 'FlutterWave';
             $moduleName = FlutterWaveServiceProvider::MODULE_NAME;
-            $status = (bool)get_payment_setting('status', $moduleName);
+            $status = (bool) get_payment_setting('status', $moduleName);
 
             return $settings . view('plugins/flutter-wave::settings', compact('name', 'moduleName', 'status'))->render(
             );
@@ -27,15 +28,15 @@ class HookServiceProvider extends ServiceProvider
 
         add_filter(BASE_FILTER_ENUM_ARRAY, function (array $values, string $class): array {
             if ($class === PaymentMethodEnum::class) {
-                $values['FlutterWave'] = FlutterWaveServiceProvider::MODULE_NAME;
+                $values['flutter_wave'] = FlutterWaveServiceProvider::MODULE_NAME;
             }
 
             return $values;
         }, 999, 2);
 
         add_filter(BASE_FILTER_ENUM_LABEL, function ($value, $class): string {
-            if ($class === FlutterWaveServiceProvider::class && $value === FlutterWaveServiceProvider::MODULE_NAME) {
-                $value = 'FlutterWave';
+            if ($class === PaymentMethodEnum::class && $value === FlutterWaveServiceProvider::MODULE_NAME) {
+                $value = 'Flutter Wave';
             }
 
             return $value;
@@ -53,7 +54,7 @@ class HookServiceProvider extends ServiceProvider
             return $value;
         }, 999, 2);
 
-        add_filter(PAYMENT_FILTER_ADDITIONAL_PAYMENT_METHODS, function (string|null $html, array $data): string|null {
+        add_filter(PAYMENT_FILTER_ADDITIONAL_PAYMENT_METHODS, function (?string $html, array $data): ?string {
             if (get_payment_setting('status', FlutterWaveServiceProvider::MODULE_NAME)) {
                 $payFlutterWave = new FlutterWaveService();
 
@@ -83,7 +84,7 @@ class HookServiceProvider extends ServiceProvider
             return $data;
         }, 1, 2);
 
-        add_filter(PAYMENT_FILTER_GET_SERVICE_CLASS, function (string|null $data, string $value): string|null {
+        add_filter(PAYMENT_FILTER_GET_SERVICE_CLASS, function (?string $data, string $value): ?string {
             if ($value === FlutterWaveServiceProvider::MODULE_NAME) {
                 $data = FlutterWavePaymentService::class;
             }
@@ -101,19 +102,28 @@ class HookServiceProvider extends ServiceProvider
             try {
                 $payFlutterWave = new FlutterWaveService();
 
-                $payFlutterWave->withData([
+                $data = [
                     'public_key' => $payFlutterWave->getPublicKey(),
                     'redirect_url' => route('payment.flutter-wave.callback'),
-                    'tx_ref' => OrderHelper::getOrderSessionToken() . '-' . time(),
                     'currency' => $data['currency'],
                     'amount' => $data['amount'],
                     'customer[email]' => $paymentData['address']['email'],
                     'customer[name]' => $paymentData['address']['name'],
                     'meta[customer_id]' => $paymentData['customer_id'],
                     'meta[customer_type]' => $paymentData['customer_type'],
-                    'meta[token]' => OrderHelper::getOrderSessionToken(),
                     'meta[order_id]' => json_encode($paymentData['order_id']),
-                ]);
+                ];
+
+                if (is_plugin_active('ecommerce')) {
+                    $data['tx_ref'] = OrderHelper::getOrderSessionToken() . '-' . time();
+                    $data['meta[token]'] = OrderHelper::getOrderSessionToken();
+                } else {
+                    $tokenGenerate = session('subscribed_packaged_id');
+                    $data['tx_ref'] = $tokenGenerate . '-' . time();
+                    $data['meta[token]'] = $tokenGenerate;
+                }
+
+                $payFlutterWave->withData($data);
 
                 $payFlutterWave->redirectToCheckoutPage();
             } catch (Throwable $exception) {

@@ -5,11 +5,13 @@ namespace FriendsOfBotble\FlutterWave\Http\Controllers;
 use Botble\Base\Http\Controllers\BaseController;
 use Botble\Base\Http\Responses\BaseHttpResponse;
 use Botble\Ecommerce\Models\Customer;
+use Botble\Hotel\Models\Booking;
 use Botble\Payment\Enums\PaymentStatusEnum;
 use Botble\Payment\Supports\PaymentHelper;
 use FriendsOfBotble\FlutterWave\Providers\FlutterWaveServiceProvider;
 use FriendsOfBotble\FlutterWave\Services\FlutterWaveService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 
 class FlutterWaveController extends BaseController
 {
@@ -59,7 +61,7 @@ class FlutterWaveController extends BaseController
         }
 
         do_action(PAYMENT_ACTION_PAYMENT_PROCESSED, [
-            'order_id' => json_decode($data['meta']['order_id']),
+            'order_id' => $orderId = json_decode($data['meta']['order_id']),
             'amount' => $data['amount'],
             'currency' => $data['currency'],
             'charge_id' => $data['id'],
@@ -69,6 +71,23 @@ class FlutterWaveController extends BaseController
             'customer_type' => $data['meta']['customer_type'],
             'payment_type' => 'direct',
         ], $request);
+
+        if (is_plugin_active('hotel')) {
+            $booking = Booking::query()
+                ->select('transaction_id')
+                ->find(Arr::first($orderId));
+
+            if (! $booking) {
+                return $response
+                    ->setNextUrl(PaymentHelper::getCancelURL())
+                    ->setMessage(__('Checkout failed!'));
+            }
+
+            return $response
+                ->setNextUrl(PaymentHelper::getRedirectURL($booking->transaction_id))
+                ->setMessage(__('Checkout successfully!'));
+        }
+
 
         $nextUrl = PaymentHelper::getRedirectURL($data['meta']['token']);
 

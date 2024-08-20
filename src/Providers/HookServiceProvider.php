@@ -10,7 +10,6 @@ use FriendsOfBotble\FlutterWave\Services\FlutterWaveService;
 use Html;
 use Illuminate\Http\Request;
 use Illuminate\Support\ServiceProvider;
-use Illuminate\Support\Str;
 use Throwable;
 
 class HookServiceProvider extends ServiceProvider

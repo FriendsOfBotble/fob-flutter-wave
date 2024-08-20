@@ -72,7 +72,7 @@ class FlutterWaveController extends BaseController
 
         $nextUrl = PaymentHelper::getRedirectURL($data['meta']['token']);
 
-        if (is_plugin_active('job-board')) {
+        if (is_plugin_active('job-board') || is_plugin_active('real-estate')) {
             $nextUrl = $nextUrl . '?charge_id=' . $data['id'];
         }
 

@@ -10,7 +10,7 @@ users to pay with their preferred payment method.
 ### Requirements
 
 * Botble core 7.0.0 or later.
-* **Ecommerce** & **Payment** plugins.
+* **Payment** plugins.
 
 ### Install via Admin Panel
 
@@ -36,7 +36,3 @@ If you discover any security related issues, please email friendsofbotble@gmail.
 
 * [Friends Of Botble](https://github.com/FriendsOfBotble)
 * [All Contributors](../../contributors)
-
-## License
-
-The MIT License (MIT). Please see [License File](LICENSE) for more information.

@@ -36,3 +36,6 @@ If you discover any security related issues, please email friendsofbotble@gmail.
 
 * [Friends Of Botble](https://github.com/FriendsOfBotble)
 * [All Contributors](../../contributors)
+
+## License
+The MIT License (MIT). Please see [License File](LICENSE) for more information.

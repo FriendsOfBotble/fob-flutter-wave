@@ -1,5 +1,5 @@
 {
-    "id": "friendsofbotble/flutter-wave",
+    "id": "friendsofbotble/fob-flutter-wave",
     "name": "FlutterWave Payment Gateway",
     "namespace": "FriendsOfBotble\\FlutterWave\\",
     "provider": "FriendsOfBotble\\FlutterWave\\Providers\\FlutterWaveServiceProvider",

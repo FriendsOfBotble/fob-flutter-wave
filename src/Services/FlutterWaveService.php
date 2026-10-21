@@ -101,7 +101,11 @@ class FlutterWaveService
      */
     public static function verifiedCheckout(array $transaction): ?array
     {
-        $meta = Arr::get($transaction, 'meta') ?: [];
+        $meta = Arr::get($transaction, 'meta');
+
+        if (! is_array($meta)) {
+            $meta = [];
+        }
 
         // Flutterwave returns meta either as an object or as a list of {metaname, metavalue}.
         if (array_is_list($meta)) {
@@ -111,17 +115,24 @@ class FlutterWaveService
                 ->all();
         }
 
+        // A value may come back decoded (e.g. order_id as an array), so re-encode instead of casting.
+        $value = fn (string $key): string => match (true) {
+            is_array($value = Arr::get($meta, $key)) => (string) json_encode($value),
+            is_scalar($value) => (string) $value,
+            default => '',
+        };
+
         $checkout = [
             'tx_ref' => (string) Arr::get($transaction, 'tx_ref'),
-            'amount' => (string) Arr::get($meta, 'amount'),
-            'currency' => (string) Arr::get($meta, 'currency'),
-            'order_id' => (string) Arr::get($meta, 'order_id'),
-            'customer_id' => (string) Arr::get($meta, 'customer_id'),
-            'customer_type' => (string) Arr::get($meta, 'customer_type'),
-            'token' => (string) Arr::get($meta, 'token'),
+            'amount' => $value('amount'),
+            'currency' => $value('currency'),
+            'order_id' => $value('order_id'),
+            'customer_id' => $value('customer_id'),
+            'customer_type' => $value('customer_type'),
+            'token' => $value('token'),
         ];
 
-        $signature = (string) Arr::get($meta, 'sig');
+        $signature = $value('sig');
 
         if (! $signature || $checkout['amount'] === '' || ! hash_equals(static::signCheckout($checkout), $signature)) {
             return null;

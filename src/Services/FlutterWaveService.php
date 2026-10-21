@@ -116,10 +116,14 @@ class FlutterWaveService
         }
 
         // A value may come back decoded (e.g. order_id as an array), so re-encode instead of casting.
-        $value = fn (string $key): string => match (true) {
-            is_array($value = Arr::get($meta, $key)) => (string) json_encode($value),
-            is_scalar($value) => (string) $value,
-            default => '',
+        $value = function (string $key) use ($meta): string {
+            $raw = Arr::get($meta, $key);
+
+            return match (true) {
+                is_array($raw) => (string) json_encode($raw),
+                is_scalar($raw) => (string) $raw,
+                default => '',
+            };
         };
 
         $checkout = [

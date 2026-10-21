@@ -4,7 +4,6 @@ namespace FriendsOfBotble\FlutterWave\Http\Controllers;
 
 use Botble\Base\Http\Controllers\BaseController;
 use Botble\Base\Http\Responses\BaseHttpResponse;
-use Botble\Ecommerce\Models\Customer;
 use Botble\Hotel\Models\Booking;
 use Botble\Payment\Enums\PaymentStatusEnum;
 use Botble\Payment\Supports\PaymentHelper;
@@ -12,6 +11,7 @@ use FriendsOfBotble\FlutterWave\Providers\FlutterWaveServiceProvider;
 use FriendsOfBotble\FlutterWave\Services\FlutterWaveService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Cache;
 
 class FlutterWaveController extends BaseController
 {
@@ -26,56 +26,29 @@ class FlutterWaveController extends BaseController
                 ->setNextUrl(PaymentHelper::getCancelURL());
         }
 
-        $result = $flutterWaveService->queryTransaction($request->input('transaction_id'));
+        $result = $flutterWaveService->queryTransaction((string) $request->input('transaction_id'));
 
-        if (! $result) {
-            return $response
-                ->setError()
-                ->setNextUrl(PaymentHelper::getCancelURL());
-        }
-
-        $data = $result['data'];
-
-        switch ($data['status']) {
-            case 'successful':
-                $status = PaymentStatusEnum::COMPLETED;
-
-                break;
-
-            case 'failure':
-                $status = PaymentStatusEnum::FAILED;
-
-                break;
-
-            default:
-                $status = PaymentStatusEnum::PENDING;
-
-                break;
-        }
-
-        if ($status === PaymentStatusEnum::FAILED) {
+        if (! empty($result['error']) || empty($result['data'])) {
             return $response
                 ->setError()
                 ->setNextUrl(PaymentHelper::getCancelURL())
-                ->setMessage($request->input('error_message'));
+                ->setMessage($result['message'] ?? null);
         }
 
-        do_action(PAYMENT_ACTION_PAYMENT_PROCESSED, [
-            'order_id' => $orderId = json_decode($data['meta']['order_id']),
-            'amount' => $data['amount'],
-            'currency' => $data['currency'],
-            'charge_id' => $data['id'],
-            'payment_channel' => FlutterWaveServiceProvider::MODULE_NAME,
-            'status' => $status,
-            'customer_id' => $data['meta']['customer_id'],
-            'customer_type' => $data['meta']['customer_type'],
-            'payment_type' => 'direct',
-        ], $request);
+        $data = $result['data'];
+        $checkout = $this->processVerifiedTransaction($data, $request);
+
+        if (! $checkout) {
+            return $response
+                ->setError()
+                ->setNextUrl(PaymentHelper::getCancelURL())
+                ->setMessage(__('Checkout failed!'));
+        }
 
         if (is_plugin_active('hotel')) {
             $booking = Booking::query()
                 ->select('transaction_id')
-                ->find(Arr::first($orderId));
+                ->find(Arr::first(Arr::wrap($checkout['order_id'])));
 
             if (! $booking) {
                 return $response
@@ -88,8 +61,7 @@ class FlutterWaveController extends BaseController
                 ->setMessage(__('Checkout successfully!'));
         }
 
-
-        $nextUrl = PaymentHelper::getRedirectURL($data['meta']['token']);
+        $nextUrl = PaymentHelper::getRedirectURL($checkout['token']);
 
         if (is_plugin_active('job-board') || is_plugin_active('real-estate')) {
             $nextUrl = $nextUrl . '?charge_id=' . $data['id'];
@@ -100,32 +72,78 @@ class FlutterWaveController extends BaseController
             ->setMessage(__('Checkout successfully!'));
     }
 
-    public function webhook(Request $request)
+    public function webhook(Request $request, FlutterWaveService $flutterWaveService)
     {
-        $data = json_decode($request->input());
-        if (! $data) {
-            return;
+        $secretHash = $flutterWaveService->getWebhookSecretHash();
+        $signature = (string) $request->header('verif-hash');
+
+        if (! $secretHash || ! $signature || ! hash_equals($secretHash, $signature)) {
+            return response()->json(['message' => 'Unauthorized'], 401);
         }
 
-        $status = match ($data['status']) {
-            'successful' => PaymentStatusEnum::COMPLETED,
-            'failure' => PaymentStatusEnum::FAILED,
-            default => PaymentStatusEnum::PENDING,
-        };
+        $payload = json_decode($request->getContent(), true);
+        $transactionId = Arr::get($payload, 'data.id');
 
-        if ($status === PaymentStatusEnum::FAILED) {
-            return;
+        if (! $transactionId) {
+            return response()->json(['message' => 'Invalid payload'], 400);
         }
 
-        do_action(PAYMENT_ACTION_PAYMENT_PROCESSED, [
-            'order_id' => json_decode($data['meta']['order_id']),
-            'amount' => $data['amount'],
-            'charge_id' => $data['id'],
-            'payment_channel' => FlutterWaveServiceProvider::MODULE_NAME,
-            'status' => $status,
-            'customer_id' => $data['customer']['id'],
-            'customer_type' => Customer::class,
-            'payment_type' => 'direct',
-        ], $request);
+        // Never trust the webhook body itself, fetch the transaction from Flutterwave.
+        $result = $flutterWaveService->queryTransaction((string) $transactionId);
+
+        if (! empty($result['error']) || empty($result['data'])) {
+            return response()->json(['message' => 'Unable to verify transaction'], 400);
+        }
+
+        $this->processVerifiedTransaction($result['data'], $request);
+
+        return response()->json(['success' => true]);
+    }
+
+    /**
+     * Completes the payment from a transaction returned by the verify API, matched against the
+     * checkout stored server-side. Returns the checkout when the payment is (or already was) completed.
+     */
+    protected function processVerifiedTransaction(array $data, Request $request): ?array
+    {
+        if (Arr::get($data, 'status') !== 'successful' || ! ($txRef = Arr::get($data, 'tx_ref'))) {
+            return null;
+        }
+
+        $cacheKey = FlutterWaveService::checkoutCacheKey($txRef);
+        $processedKey = $cacheKey . '.processed';
+
+        return Cache::lock($cacheKey . '.lock', 10)->block(5, function () use ($data, $request, $cacheKey, $processedKey) {
+            if ($checkout = Cache::get($processedKey)) {
+                return $checkout;
+            }
+
+            $checkout = Cache::get($cacheKey);
+
+            if (
+                ! $checkout
+                || strtoupper((string) Arr::get($data, 'currency')) !== $checkout['currency']
+                || (float) Arr::get($data, 'amount') < $checkout['amount']
+            ) {
+                return null;
+            }
+
+            do_action(PAYMENT_ACTION_PAYMENT_PROCESSED, [
+                'order_id' => $checkout['order_id'],
+                'amount' => $checkout['amount'],
+                'currency' => $checkout['currency'],
+                'charge_id' => $data['id'],
+                'payment_channel' => FlutterWaveServiceProvider::MODULE_NAME,
+                'status' => PaymentStatusEnum::COMPLETED,
+                'customer_id' => $checkout['customer_id'],
+                'customer_type' => $checkout['customer_type'],
+                'payment_type' => 'direct',
+            ], $request);
+
+            Cache::forget($cacheKey);
+            Cache::put($processedKey, $checkout, now()->addDay());
+
+            return $checkout;
+        });
     }
 }

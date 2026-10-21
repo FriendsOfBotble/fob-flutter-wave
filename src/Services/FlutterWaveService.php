@@ -67,7 +67,17 @@ class FlutterWaveService
         return $this->secretKey;
     }
 
-    public function queryTransaction(string $referenceNumber)
+    public function getWebhookSecretHash(): ?string
+    {
+        return get_payment_setting('webhook_secret_hash', FlutterWaveServiceProvider::MODULE_NAME) ?: null;
+    }
+
+    public static function checkoutCacheKey(string $txRef): string
+    {
+        return 'flutter-wave.checkout.' . hash('sha256', $txRef);
+    }
+
+    public function queryTransaction(string $referenceNumber): array
     {
         $response = Http::asJson()
             ->withToken($this->getSecretKey())
@@ -76,12 +86,12 @@ class FlutterWaveService
 
         if (! $response->ok()) {
             return [
-                'error' => false,
+                'error' => true,
                 'message' => $response->reason(),
             ];
         }
 
-        return $response->json();
+        return $response->json() ?: ['error' => true, 'message' => 'Invalid response.'];
     }
 
     public function refundOrder(string $chargeId, float $amount): array

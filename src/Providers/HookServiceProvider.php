@@ -8,6 +8,7 @@ use Botble\Payment\Facades\PaymentMethods;
 use FriendsOfBotble\FlutterWave\Services\FlutterWavePaymentService;
 use FriendsOfBotble\FlutterWave\Services\FlutterWaveService;
 use Html;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Http\Request;
 use Illuminate\Support\ServiceProvider;
 use Throwable;
@@ -77,6 +78,10 @@ class HookServiceProvider extends ServiceProvider
             if ($payment->payment_channel == FlutterWaveServiceProvider::MODULE_NAME) {
                 $paymentDetail = (new FlutterWavePaymentService())->getPaymentDetails($payment->charge_id);
 
+                if (empty($paymentDetail['data'])) {
+                    return $data;
+                }
+
                 $data = view('plugins/flutter-wave::detail', ['payment' => $paymentDetail])->render();
             }
 
@@ -121,6 +126,17 @@ class HookServiceProvider extends ServiceProvider
                     $data['tx_ref'] = $tokenGenerate . '-' . time();
                     $data['meta[token]'] = $tokenGenerate;
                 }
+
+                // The checkout form is posted from the browser and can be edited, so keep the
+                // expected payment server-side and check the verified transaction against it.
+                Cache::put(FlutterWaveService::checkoutCacheKey($data['tx_ref']), [
+                    'amount' => (float) $data['amount'],
+                    'currency' => strtoupper((string) $data['currency']),
+                    'order_id' => $paymentData['order_id'],
+                    'customer_id' => $paymentData['customer_id'],
+                    'customer_type' => $paymentData['customer_type'],
+                    'token' => $data['meta[token]'],
+                ], now()->addDay());
 
                 $payFlutterWave->withData($data);
 

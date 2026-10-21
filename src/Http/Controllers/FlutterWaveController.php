@@ -106,6 +106,13 @@ class FlutterWaveController extends BaseController
         }
 
         $payload = json_decode($request->getContent(), true);
+
+        // Flutterwave retries anything but a 200, so acknowledge events this plugin doesn't handle
+        // (transfers, other integrations on the same account) instead of having them retried.
+        if (! is_array($payload) || Arr::get($payload, 'event') !== 'charge.completed') {
+            return response()->json(['success' => true]);
+        }
+
         $transactionId = Arr::get($payload, 'data.id');
 
         if (! $transactionId) {
@@ -122,7 +129,8 @@ class FlutterWaveController extends BaseController
         $checkout = FlutterWaveService::verifiedCheckout($result['data']);
 
         if (! $checkout) {
-            return response()->json(['message' => 'Unknown checkout'], 400);
+            // Not a checkout signed by this store, retrying won't change that.
+            return response()->json(['success' => true, 'message' => 'Unknown checkout']);
         }
 
         try {

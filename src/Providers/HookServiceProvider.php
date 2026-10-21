@@ -9,6 +9,7 @@ use FriendsOfBotble\FlutterWave\Services\FlutterWavePaymentService;
 use FriendsOfBotble\FlutterWave\Services\FlutterWaveService;
 use Html;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Illuminate\Support\ServiceProvider;
 use Throwable;
 
@@ -77,6 +78,10 @@ class HookServiceProvider extends ServiceProvider
             if ($payment->payment_channel == FlutterWaveServiceProvider::MODULE_NAME) {
                 $paymentDetail = (new FlutterWavePaymentService())->getPaymentDetails($payment->charge_id);
 
+                if (empty($paymentDetail['data'])) {
+                    return $data;
+                }
+
                 $data = view('plugins/flutter-wave::detail', ['payment' => $paymentDetail])->render();
             }
 
@@ -113,14 +118,23 @@ class HookServiceProvider extends ServiceProvider
                     'meta[order_id]' => json_encode($paymentData['order_id']),
                 ];
 
-                if (is_plugin_active('ecommerce')) {
-                    $data['tx_ref'] = OrderHelper::getOrderSessionToken() . '-' . time();
-                    $data['meta[token]'] = OrderHelper::getOrderSessionToken();
-                } else {
-                    $tokenGenerate = session('subscribed_packaged_id');
-                    $data['tx_ref'] = $tokenGenerate . '-' . time();
-                    $data['meta[token]'] = $tokenGenerate;
-                }
+                $token = is_plugin_active('ecommerce')
+                    ? OrderHelper::getOrderSessionToken()
+                    : session('subscribed_packaged_id');
+
+                $data['tx_ref'] = $token . '-' . time() . '-' . Str::lower(Str::random(6));
+                $data['meta[token]'] = $token;
+                $data['meta[amount]'] = FlutterWaveService::formatAmount($data['amount']);
+                $data['meta[currency]'] = strtoupper((string) $data['currency']);
+                $data['meta[sig]'] = FlutterWaveService::signCheckout([
+                    'tx_ref' => $data['tx_ref'],
+                    'amount' => $data['meta[amount]'],
+                    'currency' => $data['meta[currency]'],
+                    'order_id' => $data['meta[order_id]'],
+                    'customer_id' => $data['meta[customer_id]'],
+                    'customer_type' => $data['meta[customer_type]'],
+                    'token' => $token,
+                ]);
 
                 $payFlutterWave->withData($data);
 

@@ -17,6 +17,7 @@ class Plugin extends PluginOperationAbstract
                 'payment_flutter_wave_secret_key',
                 'payment_flutter_wave_encryption_key',
                 'payment_flutter_wave_status',
+                'payment_flutter_wave_webhook_secret_hash',
             ])->delete();
     }
 }

@@ -96,6 +96,15 @@
                                 placeholder="xxxxxxxx"
                             />
 
+                            <x-core-setting::text-input
+                                :name="'payment_' . $moduleName . '_webhook_secret_hash'"
+                                :label="trans('plugins/flutter-wave::flutter-wave.webhook_secret_hash')"
+                                :value="get_payment_setting('webhook_secret_hash', $moduleName)"
+                                :helper-text="trans('plugins/flutter-wave::flutter-wave.webhook_secret_hash_helper', ['url' => route('payment.flutter-wave.webhook')])"
+                                type="password"
+                                placeholder="xxxxxxxx"
+                            />
+
                             {!! apply_filters(PAYMENT_METHOD_SETTINGS_CONTENT, null, $moduleName) !!}
                         </div>
                     </div>

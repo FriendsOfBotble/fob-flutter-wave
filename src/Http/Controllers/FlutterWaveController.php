@@ -6,11 +6,13 @@ use Botble\Base\Http\Controllers\BaseController;
 use Botble\Base\Http\Responses\BaseHttpResponse;
 use Botble\Hotel\Models\Booking;
 use Botble\Payment\Enums\PaymentStatusEnum;
+use Botble\Payment\Models\Payment;
 use Botble\Payment\Supports\PaymentHelper;
 use FriendsOfBotble\FlutterWave\Providers\FlutterWaveServiceProvider;
 use FriendsOfBotble\FlutterWave\Services\FlutterWaveService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
+use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Support\Facades\Cache;
 
 class FlutterWaveController extends BaseController
@@ -36,12 +38,34 @@ class FlutterWaveController extends BaseController
         }
 
         $data = $result['data'];
-        $checkout = $this->processVerifiedTransaction($data, $request);
+        $checkout = FlutterWaveService::verifiedCheckout($data);
 
         if (! $checkout) {
             return $response
                 ->setError()
                 ->setNextUrl(PaymentHelper::getCancelURL())
+                ->setMessage(__('Checkout failed!'));
+        }
+
+        // Bank transfer, USSD and mobile money can stay pending for a while, the webhook completes them.
+        if (in_array(Arr::get($data, 'status'), ['pending', 'processing'], true)) {
+            return $response
+                ->setNextUrl(PaymentHelper::getRedirectURL($checkout['token']))
+                ->setMessage(__('Your payment is being processed.'));
+        }
+
+        try {
+            $completed = $this->processVerifiedTransaction($data, $checkout, $request);
+        } catch (LockTimeoutException) {
+            return $response
+                ->setNextUrl(PaymentHelper::getRedirectURL($checkout['token']))
+                ->setMessage(__('Your payment is being processed.'));
+        }
+
+        if (! $completed) {
+            return $response
+                ->setError()
+                ->setNextUrl(PaymentHelper::getCancelURL($checkout['token']))
                 ->setMessage(__('Checkout failed!'));
         }
 
@@ -95,55 +119,61 @@ class FlutterWaveController extends BaseController
             return response()->json(['message' => 'Unable to verify transaction'], 400);
         }
 
-        $this->processVerifiedTransaction($result['data'], $request);
+        $checkout = FlutterWaveService::verifiedCheckout($result['data']);
+
+        if (! $checkout) {
+            return response()->json(['message' => 'Unknown checkout'], 400);
+        }
+
+        try {
+            $this->processVerifiedTransaction($result['data'], $checkout, $request);
+        } catch (LockTimeoutException) {
+            return response()->json(['message' => 'Busy, retry later'], 409);
+        }
 
         return response()->json(['success' => true]);
     }
 
     /**
      * Completes the payment from a transaction returned by the verify API, matched against the
-     * checkout stored server-side. Returns the checkout when the payment is (or already was) completed.
+     * signed checkout. Returns true when the payment is (or already was) completed.
      */
-    protected function processVerifiedTransaction(array $data, Request $request): ?array
+    protected function processVerifiedTransaction(array $data, array $checkout, Request $request): bool
     {
-        if (Arr::get($data, 'status') !== 'successful' || ! ($txRef = Arr::get($data, 'tx_ref'))) {
-            return null;
+        if (
+            Arr::get($data, 'status') !== 'successful'
+            || strtoupper((string) Arr::get($data, 'currency')) !== $checkout['currency']
+            || round((float) Arr::get($data, 'amount'), 2) < round($checkout['amount'], 2)
+        ) {
+            return false;
         }
 
-        $cacheKey = FlutterWaveService::checkoutCacheKey($txRef);
-        $processedKey = $cacheKey . '.processed';
+        $chargeId = (string) $data['id'];
 
-        return Cache::lock($cacheKey . '.lock', 10)->block(5, function () use ($data, $request, $cacheKey, $processedKey) {
-            if ($checkout = Cache::get($processedKey)) {
-                return $checkout;
-            }
+        // The callback and the webhook can arrive together, only process the payment once.
+        return Cache::lock('flutter-wave.payment.' . $chargeId, 10)->block(5, function () use ($data, $checkout, $chargeId, $request): bool {
+            $alreadyCompleted = Payment::query()
+                ->where('charge_id', $chargeId)
+                ->where('status', PaymentStatusEnum::COMPLETED)
+                ->exists();
 
-            $checkout = Cache::get($cacheKey);
-
-            if (
-                ! $checkout
-                || strtoupper((string) Arr::get($data, 'currency')) !== $checkout['currency']
-                || (float) Arr::get($data, 'amount') < $checkout['amount']
-            ) {
-                return null;
+            if ($alreadyCompleted) {
+                return true;
             }
 
             do_action(PAYMENT_ACTION_PAYMENT_PROCESSED, [
                 'order_id' => $checkout['order_id'],
                 'amount' => $checkout['amount'],
                 'currency' => $checkout['currency'],
-                'charge_id' => $data['id'],
+                'charge_id' => $chargeId,
                 'payment_channel' => FlutterWaveServiceProvider::MODULE_NAME,
                 'status' => PaymentStatusEnum::COMPLETED,
-                'customer_id' => $checkout['customer_id'],
-                'customer_type' => $checkout['customer_type'],
+                'customer_id' => $checkout['customer_id'] ?: null,
+                'customer_type' => $checkout['customer_type'] ?: null,
                 'payment_type' => 'direct',
             ], $request);
 
-            Cache::forget($cacheKey);
-            Cache::put($processedKey, $checkout, now()->addDay());
-
-            return $checkout;
+            return true;
         });
     }
 }
